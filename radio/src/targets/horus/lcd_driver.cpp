@@ -32,14 +32,24 @@
 #define LCD_FIRST_LAYER                0
 #define LCD_SECOND_LAYER               1
 
-uint8_t LCD_FIRST_FRAME_BUFFER[DISPLAY_BUFFER_SIZE * sizeof(display_t)] __SDRAM;
-uint8_t LCD_SECOND_FRAME_BUFFER[DISPLAY_BUFFER_SIZE * sizeof(display_t)] __SDRAM;
-uint8_t LCD_BACKUP_FRAME_BUFFER[DISPLAY_BUFFER_SIZE * sizeof(display_t)] __SDRAM;
+uint8_t LCD_FIRST_FRAME_BUFFER[DISPLAY_BUFFER_SIZE * sizeof(pixel_t)] __SDRAM;
+uint8_t LCD_SECOND_FRAME_BUFFER[DISPLAY_BUFFER_SIZE * sizeof(pixel_t)] __SDRAM;
+uint8_t LCD_BACKUP_FRAME_BUFFER[DISPLAY_BUFFER_SIZE * sizeof(pixel_t)] __SDRAM;
+uint8_t currentLayer = LCD_FIRST_LAYER;
 
-uint32_t CurrentLayer = LCD_FIRST_LAYER;
+BitmapBuffer lcdBuffer1(BMP_RGB565, LCD_W, LCD_H, (uint16_t *)LCD_FIRST_FRAME_BUFFER);
+BitmapBuffer lcdBuffer2(BMP_RGB565, LCD_W, LCD_H, (uint16_t *)LCD_SECOND_FRAME_BUFFER);
+BitmapBuffer * lcd = &lcdBuffer1;
 
-#define NRST_LOW()   do { LCD_GPIO_NRST->BSRRH = LCD_GPIO_PIN_NRST; } while(0)
-#define NRST_HIGH()  do { LCD_GPIO_NRST->BSRRL = LCD_GPIO_PIN_NRST; } while(0)
+inline void LCD_NRST_LOW()
+{
+  LCD_GPIO_NRST->BSRRH = LCD_GPIO_PIN_NRST;
+}
+
+inline void LCD_NRST_HIGH()
+{
+  LCD_GPIO_NRST->BSRRL = LCD_GPIO_PIN_NRST;
+}
 
 static void LCD_AF_GPIOConfig(void)
 {
@@ -125,31 +135,21 @@ static void LCD_NRSTConfig(void)
   GPIO_Init(LCD_GPIO_NRST, &GPIO_InitStructure);
 }
 
-// TODO delay function
-static void delay3(uint32_t nCount)
+static void lcdReset()
 {
-  uint32_t index = 0;
-  for(index = (1000 * 100 * nCount); index != 0; --index)
-  {
-    __asm("nop\n");
-  }
+  LCD_NRST_HIGH();
+  delay_ms(1);
+
+  LCD_NRST_LOW(); // RESET;
+  delay_ms(20);
+
+  LCD_NRST_HIGH();
+  delay_ms(20);
 }
 
-static void lcd_reset(void)
+void LCD_Init_LTDC()
 {
-  NRST_HIGH();
-  delay3(1);
-
-  NRST_LOW(); //  RESET();
-  delay3(20);
-
-  NRST_HIGH();
-  delay3(30);
-}
-
-void LCD_Init_LTDC(void)
-{
-  LTDC_InitTypeDef       LTDC_InitStruct;
+  LTDC_InitTypeDef LTDC_InitStruct;
 
   /* Configure PLLSAI prescalers for LCD */
   /* PLLSAI_VCO Input = HSE_VALUE/PLL_M = 1 Mhz */
@@ -159,7 +159,7 @@ void LCD_Init_LTDC(void)
   //second pam is for audio
   //third pam is for LCD
   RCC_PLLSAIConfig(192, 6, 3);
-  RCC_LTDCCLKDivConfig(RCC_PLLSAIDivR_Div4);  //Modify by Fy
+  RCC_LTDCCLKDivConfig(RCC_PLLSAIDivR_Div4);
   /* Enable PLLSAI Clock */
   RCC_PLLSAICmd(ENABLE);
 
@@ -201,7 +201,7 @@ void LCD_Init_LTDC(void)
   /* Configure total height */
   LTDC_InitStruct.LTDC_TotalHeigh = LCD_H + VBP + VFP;
 
-// init ltdc
+  // init ltdc
   LTDC_Init(&LTDC_InitStruct);
 
 #if 0
@@ -224,11 +224,6 @@ void LCD_Init_LTDC(void)
 #endif
 }
 
-/**
-  * @brief  Initializes the LCD Layers.
-  * @param  None
-  * @retval None
-  */
 void LCD_LayerInit()
 {
   LTDC_Layer_InitTypeDef LTDC_Layer_InitStruct;
@@ -300,17 +295,11 @@ void LCD_LayerInit()
   LTDC_DitherCmd(ENABLE);
 }
 
-/*********************************output****************************************/
-/**
-  * @brief  Initializes the LCD.
-  * @param  None
-  * @retval None
-  */
 void LCD_Init(void)
 {
   /* Reset the LCD --------------------------------------------------------*/
   LCD_NRSTConfig();
-  lcd_reset();
+  lcdReset();
 
   /* Configure the LCD Control pins */
   LCD_AF_GPIOConfig();
@@ -318,25 +307,15 @@ void LCD_Init(void)
   LCD_Init_LTDC();
 }
 
-BitmapBuffer lcdBuffer1(BMP_RGB565, LCD_W, LCD_H, (uint16_t *)LCD_FIRST_FRAME_BUFFER);
-BitmapBuffer lcdBuffer2(BMP_RGB565, LCD_W, LCD_H, (uint16_t *)LCD_SECOND_FRAME_BUFFER);
-BitmapBuffer * lcd = &lcdBuffer1;
-
-/**
-  * @brief  Sets the LCD Layer.
-  * @param  Layerx: specifies the Layer foreground or background.
-  * @retval None
-  */
-void LCD_SetLayer(uint32_t Layerx)
+void LCD_SetLayer(uint32_t layer)
 {
-  if (Layerx == LCD_FIRST_LAYER) {
+  if (layer == LCD_FIRST_LAYER) {
     lcd = &lcdBuffer1;
-    CurrentLayer = LCD_FIRST_LAYER;
   }
   else {
     lcd = &lcdBuffer2;
-    CurrentLayer = LCD_SECOND_LAYER;
   }
+  currentLayer = layer;
 }
 
 /**
@@ -347,7 +326,7 @@ void LCD_SetLayer(uint32_t Layerx)
   */
 void LCD_SetTransparency(uint8_t transparency)
 {
-  if (CurrentLayer == LCD_FIRST_LAYER) {
+  if (currentLayer == LCD_FIRST_LAYER) {
     LTDC_LayerAlpha(LTDC_Layer1, transparency);
   }
   else {
@@ -356,7 +335,7 @@ void LCD_SetTransparency(uint8_t transparency)
   LTDC_ReloadConfig(LTDC_IMReload);
 }
 
-void lcdInit(void)
+void lcdInit()
 {
   /* Initialize the LCD */
   LCD_Init();
@@ -378,7 +357,7 @@ void lcdInit(void)
 
 void DMAFillRect(uint16_t * dest, uint16_t destw, uint16_t desth, uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color)
 {
-#if defined(PCBX10)
+#if defined(LCD_VERTICAL_INVERT)
   x = destw - (x + w);
   y = desth - (y + h);
 #endif
@@ -407,7 +386,7 @@ void DMAFillRect(uint16_t * dest, uint16_t destw, uint16_t desth, uint16_t x, ui
 
 void DMACopyBitmap(uint16_t * dest, uint16_t destw, uint16_t desth, uint16_t x, uint16_t y, const uint16_t * src, uint16_t srcw, uint16_t srch, uint16_t srcx, uint16_t srcy, uint16_t w, uint16_t h)
 {
-#if defined(PCBX10)
+#if defined(LCD_VERTICAL_INVERT)
   x = destw - (x + w);
   y = desth - (y + h);
   srcx = srcw - (srcx + w);
@@ -447,7 +426,7 @@ void DMACopyBitmap(uint16_t * dest, uint16_t destw, uint16_t desth, uint16_t x, 
 
 void DMACopyAlphaBitmap(uint16_t * dest, uint16_t destw, uint16_t desth, uint16_t x, uint16_t y, const uint16_t * src, uint16_t srcw, uint16_t srch, uint16_t srcx, uint16_t srcy, uint16_t w, uint16_t h)
 {
-#if defined(PCBX10)
+#if defined(LCD_VERTICAL_INVERT)
   x = destw - (x + w);
   y = desth - (y + h);
   srcx = srcw - (srcx + w);
@@ -527,7 +506,7 @@ void DMABitmapConvert(uint16_t * dest, const uint8_t * src, uint16_t w, uint16_t
   while (DMA2D_GetFlagStatus(DMA2D_FLAG_TC) == RESET);
 }
 
-void DMAcopy(void * src, void * dest, int len)
+void lcdCopy(void * dest, void * src)
 {
   DMA2D_DeInit();
 
@@ -562,21 +541,34 @@ void DMAcopy(void * src, void * dest, int len)
 
 void lcdStoreBackupBuffer()
 {
-  DMAcopy(lcd->getData(), LCD_BACKUP_FRAME_BUFFER, DISPLAY_BUFFER_SIZE * sizeof(display_t));
+  lcdCopy(LCD_BACKUP_FRAME_BUFFER, lcd->getData());
 }
 
 int lcdRestoreBackupBuffer()
 {
-  DMAcopy(LCD_BACKUP_FRAME_BUFFER, lcd->getData(), DISPLAY_BUFFER_SIZE * sizeof(display_t));
+  lcdCopy(lcd->getData(), LCD_BACKUP_FRAME_BUFFER);
   return 1;
 }
 
 void lcdRefresh()
 {
-  LCD_SetTransparency(255);
-  if (CurrentLayer == LCD_FIRST_LAYER)
+  if (currentLayer == LCD_FIRST_LAYER) {
+    LTDC_LayerAlpha(LTDC_Layer1, 255);
+    LTDC_LayerAlpha(LTDC_Layer2, 0);
+  }
+  else {
+    LTDC_LayerAlpha(LTDC_Layer1, 0);
+    LTDC_LayerAlpha(LTDC_Layer2, 255);
+  }
+  LTDC_ReloadConfig(LTDC_IMReload);
+}
+
+void lcdNextLayer()
+{
+  if (currentLayer == LCD_FIRST_LAYER) {
     LCD_SetLayer(LCD_SECOND_LAYER);
-  else
+  }
+  else {
     LCD_SetLayer(LCD_FIRST_LAYER);
-  LCD_SetTransparency(0);
+  }
 }

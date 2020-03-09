@@ -1,12 +1,12 @@
 project(OpenTX)
 
 set(VERSION_MAJOR "2")
-set(VERSION_MINOR "3")
+set(VERSION_MINOR "4")
 set(VERSION_REVISION "0")
 set(VERSION_SUFFIX $ENV{OPENTX_VERSION_SUFFIX})
 set(VERSION_FAMILY ${VERSION_MAJOR}.${VERSION_MINOR})
 set(VERSION ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_REVISION}${VERSION_SUFFIX})
-set(SDCARD_REVISION "0018")
+set(SDCARD_REVISION "0026")
 set(SDCARD_VERSION  ${VERSION_MAJOR}.${VERSION_MINOR}V${SDCARD_REVISION})
 
 cmake_minimum_required(VERSION 2.8)
@@ -28,11 +28,14 @@ endif()
 set(CMAKE_COLOR_MAKEFILE ON)
 
 set(CMAKE_CXX_STANDARD 11)
+add_definitions(-D_GLIBCXX_USE_C99=1) # proper to_string definition
 
 set(RADIO_DIRECTORY ${PROJECT_SOURCE_DIR}/radio)
-set(RADIO_SRC_DIRECTORY ${RADIO_DIRECTORY}/src)
+set(RADIO_SRC_DIR ${RADIO_DIRECTORY}/src)
 set(COMPANION_SRC_DIRECTORY ${PROJECT_SOURCE_DIR}/companion/src)
 set(SIMU_SRC_DIRECTORY ${COMPANION_SRC_DIRECTORY}/simulation)
+set(TOOLS_DIR ${PROJECT_SOURCE_DIR}/tools)
+set(LIBOPENUI_TOOLS_DIR ${RADIO_SRC_DIR}/thirdparty/libopenui/tools)
 
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
@@ -43,7 +46,7 @@ today(DATE)
 now(TIME)
 git_id(GIT_STR)
 
-message(STATUS "OpenTX ${VERSION} @${GIT_STR}")
+message(STATUS "OpenTX ${VERSION} @ ${GIT_STR}")
 
 # options shared by all targets
 
@@ -63,7 +66,7 @@ if(WIN32)
 endif()
 
 # Python check
-find_package("PythonInterp")
+find_package(PythonInterp 3 REQUIRED)
 if(PYTHONINTERP_FOUND)
   message(STATUS "Python found, version: ${PYTHON_VERSION_STRING}")
   get_filename_component(PYTHON_DIRECTORY ${PYTHON_EXECUTABLE} DIRECTORY)
@@ -79,6 +82,14 @@ endif()
 option(DISABLE_COMPANION "Disable building companion and simulators" OFF)
 
 if(NOT DISABLE_COMPANION)  # FIXME cosmetics/style
+
+if(APPLE AND EXISTS /usr/local/opt/qt5)
+	# Homebrew installs Qt5 (up to at least 5.9.1) in
+	# /usr/local/qt5, ensure it can be found by CMake since
+	# it is not in the default /usr/local prefix.
+	list(APPEND CMAKE_PREFIX_PATH "/usr/local/opt/qt5")
+endif()
+
 find_package(Qt5Core)
 find_package(Qt5Widgets)
 find_package(Qt5Xml)
@@ -163,15 +174,15 @@ endif()
 endif(NOT DISABLE_COMPANION)
 
 # Check for a file that is typically left from a OpenTX 2.1 build and abort if found
-if (EXISTS ${RADIO_SRC_DIRECTORY}/stamp.h OR EXISTS ${RADIO_SRC_DIRECTORY}/translations/en.h)
+if (EXISTS ${RADIO_SRC_DIR}/stamp.h OR EXISTS ${RADIO_SRC_DIR}/translations/en.h)
    message(FATAL_ERROR "Source directory contains files leftover from a OpenTX 2.1 build. Please run `git clean -f` in source directory (Careful: Will remove any extra files) or do a new clean git checkout")
 endif()
 
 # Windows-specific includes and libs shared by sub-projects
 if(WIN32)
-  list(APPEND WIN_INCLUDE_DIRS "${RADIO_SRC_DIRECTORY}/thirdparty/windows/dirent")
+  list(APPEND WIN_INCLUDE_DIRS "${RADIO_SRC_DIR}/thirdparty/windows/dirent")
   if(MSVC)
-    list(APPEND WIN_INCLUDE_DIRS "${RADIO_SRC_DIRECTORY}/thirdparty/windows/msinttypes")
+    list(APPEND WIN_INCLUDE_DIRS "${RADIO_SRC_DIR}/thirdparty/windows/msinttypes")
     set(WIN_PTHREAD_BASE_PATH "${WIN_EXTRA_LIBS_PATH}/pthreads/Pre-built.2" CACHE PATH "Where to find pthreads include and lib folders.")
     list(APPEND WIN_INCLUDE_DIRS "${WIN_PTHREAD_BASE_PATH}/include")
     find_file(WIN_PTHREAD_LIB pthreadVC2.lib PATHS "${WIN_PTHREAD_BASE_PATH}" PATH_SUFFIXES lib/x86 lib NO_DEFAULT_PATH)
@@ -189,8 +200,56 @@ if(WIN32)
   endif()
 endif()
 
-add_subdirectory(${RADIO_SRC_DIRECTORY})
+set(GTEST_ROOT /usr CACHE STRING "Base path to Google Test headers and source.")
+
+find_path(GTEST_INCDIR gtest/gtest.h HINTS "${GTEST_ROOT}/include" DOC "Path to Google Test header files folder ('gtest/gtest.h').")
+find_path(GTEST_SRCDIR src/gtest-all.cc HINTS "${GTEST_ROOT}" "${GTEST_ROOT}/src/gtest" DOC "Path of Google Test 'src' folder.")
+
+if(NOT GTEST_INCDIR OR NOT GTEST_SRCDIR)
+  message(STATUS "Googletest will be downloaded")
+
+  set(GTEST_VERSION 1.8.1)
+
+  set(GTEST_SRCDIR "${RADIO_SRC_DIR}/tests/googletest-release-${GTEST_VERSION}/googletest")
+  set(GTEST_INCDIR "${GTEST_SRCDIR}/include")
+
+  set(GTEST_URL     "https://github.com/google/googletest/archive/release-${GTEST_VERSION}.tar.gz")
+  set(GTEST_ARCHIVE "${RADIO_SRC_DIR}/tests/gtest-${GTEST_VERSION}.tar.gz")
+
+  if (NOT EXISTS "${GTEST_SRCDIR}")
+    file(DOWNLOAD "${GTEST_URL}" ${GTEST_ARCHIVE} SHOW_PROGRESS)
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} -E tar -xf ${GTEST_ARCHIVE}
+      WORKING_DIRECTORY ${RADIO_SRC_DIR}/tests)
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} -E remove -f ${GTEST_ARCHIVE})
+  endif()
+endif()
+
+add_subdirectory(${RADIO_SRC_DIR})
+
+add_custom_target(tests-radio
+  COMMAND ${CMAKE_CURRENT_BINARY_DIR}/gtests-radio
+  DEPENDS gtests-radio
+  )
 
 if(Qt5Core_FOUND AND NOT DISABLE_COMPANION)
   add_subdirectory(${COMPANION_SRC_DIRECTORY})
+  add_custom_target(tests-companion
+    COMMAND ${CMAKE_CURRENT_BINARY_DIR}/gtests-companion
+    DEPENDS gtests-companion
+    )
+  add_custom_target(gtests
+    DEPENDS gtests-radio gtests-companion
+    )
+  add_custom_target(tests
+    DEPENDS tests-radio tests-companion
+  )
+else()
+  add_custom_target(gtests
+    DEPENDS gtests-radio
+    )
+  add_custom_target(tests
+    DEPENDS tests-radio
+  )
 endif()

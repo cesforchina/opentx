@@ -19,14 +19,14 @@
  */
 
 #include "opentx.h"
-#include "timers.h"
+#include "common/stdlcd/fonts.h"
 
 #if (defined(PCBX9E) || defined(PCBX9DP)) && defined(LCD_DUAL_BUFFER)
-  display_t displayBuf1[DISPLAY_BUFFER_SIZE] __DMA;
-  display_t displayBuf2[DISPLAY_BUFFER_SIZE] __DMA;
-  display_t * displayBuf = displayBuf1;
+  pixel_t displayBuf1[DISPLAY_BUFFER_SIZE] __DMA;
+  pixel_t displayBuf2[DISPLAY_BUFFER_SIZE] __DMA;
+  pixel_t * displayBuf = displayBuf1;
 #else
-  display_t displayBuf[DISPLAY_BUFFER_SIZE] __DMA;
+  pixel_t displayBuf[DISPLAY_BUFFER_SIZE] __DMA;
 #endif
 
 inline bool lcdIsPointOutside(coord_t x, coord_t y)
@@ -36,7 +36,7 @@ inline bool lcdIsPointOutside(coord_t x, coord_t y)
 
 void lcdClear()
 {
-  memset(displayBuf, 0, DISPLAY_BUFFER_SIZE * sizeof(display_t));
+  memset(displayBuf, 0, DISPLAY_BUFFER_SIZE * sizeof(pixel_t));
 }
 
 coord_t lcdLastRightPos;
@@ -209,7 +209,7 @@ void getCharPattern(PatternData * pattern, unsigned char c, LcdFlags flags)
   else {
     pattern->width = 5;
     pattern->height = 7;
-    pattern->data = (c < 0xC0) ? &font_5x7[(c-0x20)*5] : &font_5x7_extra[(c-0xC0)*5];
+    pattern->data = (c < 0x80) ? &font_5x7[(c-0x20)*5] : &font_5x7_extra[(c-0x80)*5];
   }
 }
 
@@ -244,7 +244,7 @@ uint8_t getTextWidth(const char * s, uint8_t len, LcdFlags flags)
 {
   uint8_t width = 0;
   for (int i=0; len==0 || i<len; ++i) {
-    unsigned char c = (flags & ZCHAR) ? idx2char(*s) : *s;
+    unsigned char c = *s;
     if (!c) {
       break;
     }
@@ -268,14 +268,14 @@ void lcdDrawSizedText(coord_t x, coord_t y, const char * s, uint8_t len, LcdFlag
     width = getTextWidth(s, len, flags);
     x -= width;
   }
+  else if (flags & CENTERED) {
+    width = getTextWidth(s, len, flags);
+    x -= width / 2;
+  }
 #endif
 
   while (len--) {
-#if defined(BOOT)
     unsigned char c = *s;
-#else
-    unsigned char c = (flags & ZCHAR) ? idx2char(*s) : *s;
-#endif
 
     if (setx) {
       x = c;
@@ -347,6 +347,12 @@ void lcdDrawSizedText(coord_t x, coord_t y, const char * s, uint8_t len)
   lcdDrawSizedText(x, y, s, len, 0);
 }
 
+void lcdDrawCenteredText(coord_t y, const char * s, LcdFlags flags)
+{
+  coord_t x = (LCD_W - getTextWidth(s, flags)) / 2;
+  lcdDrawText(x, y, s, flags);
+}
+
 void lcdDrawText(coord_t x, coord_t y, const char * s, LcdFlags flags)
 {
   lcdDrawSizedText(x, y, s, 255, flags);
@@ -366,7 +372,7 @@ void lcdDrawTextAlignedLeft(coord_t y, const char * s)
 void lcdDrawTextAtIndex(coord_t x, coord_t y, const char * s,uint8_t idx, LcdFlags flags)
 {
   uint8_t length = *(s++);
-  lcdDrawSizedText(x, y, s+length*idx, length, flags & ~ZCHAR);
+  lcdDrawSizedText(x, y, s+length*idx, length, flags);
 }
 
 void lcdDrawHexNumber(coord_t x, coord_t y, uint32_t val, LcdFlags flags)
@@ -411,7 +417,7 @@ void lcdDrawNumber(coord_t x, coord_t y, int32_t val, LcdFlags flags, uint8_t le
   if (neg) {
     *--s = '-';
   }
-  flags &= ~LEADING0;
+  flags &= ~(LEADING0 | PREC1 | PREC2);
   lcdDrawText(x, y, s, flags);
 }
 #endif
@@ -467,7 +473,7 @@ void lcdDrawLine(coord_t x1, coord_t y1, coord_t x2, coord_t y2, uint8_t pat, Lc
 }
 #endif
 
-void lcdDrawSolidVerticalLine(coord_t x, scoord_t y, scoord_t h, LcdFlags att)
+void lcdDrawSolidVerticalLine(coord_t x, coord_t y, coord_t h, LcdFlags att)
 {
   lcdDrawVerticalLine(x, y, h, SOLID, att);
 }
@@ -482,9 +488,9 @@ void lcdDrawRect(coord_t x, coord_t y, coord_t w, coord_t h, uint8_t pat, LcdFla
 }
 
 #if !defined(BOOT)
-void lcdDrawFilledRect(coord_t x, scoord_t y, coord_t w, coord_t h, uint8_t pat, LcdFlags att)
+void lcdDrawFilledRect(coord_t x, coord_t y, coord_t w, coord_t h, uint8_t pat, LcdFlags att)
 {
-  for (scoord_t i=y; i<(scoord_t)(y+h); i++) {
+  for (coord_t i=y; i<y+h; i++) {
     if ((att&ROUND) && (i==y || i==y+h-1))
       lcdDrawHorizontalLine(x+1, i, w-2, pat, att);
     else
@@ -495,7 +501,7 @@ void lcdDrawFilledRect(coord_t x, scoord_t y, coord_t w, coord_t h, uint8_t pat,
 
 void drawTelemetryTopBar()
 {
-  putsModelName(0, 0, g_model.header.name, g_eeGeneral.currModel, 0);
+  drawModelName(0, 0, g_model.header.name, g_eeGeneral.currModel, 0);
   uint8_t att = (IS_TXBATT_WARNING() ? BLINK : 0);
   putsVBat(12*FW, 0, att);
   if (g_model.timers[0].mode) {
@@ -516,7 +522,7 @@ void drawRtcTime(coord_t x, coord_t y, LcdFlags att)
   drawTimer(x, y, getValue(MIXSRC_TX_TIME), att, att);
 }
 
-void drawTimer(coord_t x, coord_t y, putstime_t tme, LcdFlags att, LcdFlags att2)
+void drawTimer(coord_t x, coord_t y, int32_t tme, LcdFlags att, LcdFlags att2)
 {
   div_t qr;
 
@@ -571,7 +577,7 @@ void putsVBat(coord_t x, coord_t y, LcdFlags att)
   putsVolts(x, y, g_vbat100mV, att);
 }
 
-void putsStickName(coord_t x, coord_t y, uint8_t idx, LcdFlags att)
+void drawStickName(coord_t x, coord_t y, uint8_t idx, LcdFlags att)
 {
   uint8_t length = STR_VSRCRAW[0];
   lcdDrawSizedText(x, y, STR_VSRCRAW+2+length*(idx+1), length-1, att);
@@ -586,7 +592,7 @@ void drawSource(coord_t x, coord_t y, uint32_t idx, LcdFlags att)
     lcdDrawChar(x+2, y+1, CHR_INPUT, TINSIZE);
     lcdDrawFilledRect(x, y, 7, 7);
     if (ZEXIST(g_model.inputNames[idx-MIXSRC_FIRST_INPUT]))
-      lcdDrawSizedText(x+8, y, g_model.inputNames[idx-MIXSRC_FIRST_INPUT], LEN_INPUT_NAME, ZCHAR|att);
+      lcdDrawSizedText(x+8, y, g_model.inputNames[idx-MIXSRC_FIRST_INPUT], LEN_INPUT_NAME, att);
     else
       lcdDrawNumber(x+8, y, idx, att|LEADING0|LEFT, 2);
   }
@@ -609,26 +615,27 @@ void drawSource(coord_t x, coord_t y, uint32_t idx, LcdFlags att)
 
   else if (idx <= MIXSRC_LAST_POT) {
     idx = idx-MIXSRC_Rud;
-    if (ZEXIST(g_eeGeneral.anaNames[idx])) {
+    if (g_eeGeneral.anaNames[idx][0]) {
       if (idx < MIXSRC_FIRST_POT-MIXSRC_Rud )
-        lcdDrawChar(x, y, '\307', att); //stick symbol
+        lcdDrawChar(x, y, '\207', att); //stick symbol
       else if (idx < MIXSRC_FIRST_SLIDER-MIXSRC_Rud )
-        lcdDrawChar(x, y, '\310', att); //pot symbol
+        lcdDrawChar(x, y, '\210', att); //pot symbol
       else
-        lcdDrawChar(x, y, '\311', att); //slider symbol
-      lcdDrawSizedText(lcdNextPos, y, g_eeGeneral.anaNames[idx], LEN_ANA_NAME, ZCHAR|att);
+        lcdDrawChar(x, y, '\211', att); //slider symbol
+      lcdDrawSizedText(lcdNextPos, y, g_eeGeneral.anaNames[idx], LEN_ANA_NAME, att);
     }
     else
       lcdDrawTextAtIndex(x, y, STR_VSRCRAW, idx+1, att);
   }
   else if (idx >= MIXSRC_FIRST_SWITCH && idx <= MIXSRC_LAST_SWITCH) {
-    idx = idx-MIXSRC_FIRST_SWITCH;
-    if (ZEXIST(g_eeGeneral.switchNames[idx])) {
-      lcdDrawChar(x, y, '\312', att); //switch symbol
-      lcdDrawSizedText(lcdNextPos, y, g_eeGeneral.switchNames[idx], LEN_SWITCH_NAME, ZCHAR|att);
+    idx = idx - MIXSRC_FIRST_SWITCH;
+    if (g_eeGeneral.switchNames[idx][0]) {
+      lcdDrawChar(x, y, '\212', att); //switch symbol
+      lcdDrawSizedText(lcdNextPos, y, g_eeGeneral.switchNames[idx], LEN_SWITCH_NAME, att);
     }
-    else
-      lcdDrawTextAtIndex(x, y, STR_VSRCRAW, idx+MIXSRC_FIRST_SWITCH-MIXSRC_Rud+1, att);
+    else {
+      lcdDrawTextAtIndex(x, y, STR_VSRCRAW, idx + MIXSRC_FIRST_SWITCH - MIXSRC_Rud + 1, att);
+    }
   }
   else if (idx < MIXSRC_SW1)
     lcdDrawTextAtIndex(x, y, STR_VSRCRAW, idx-MIXSRC_Rud+1, att);
@@ -640,7 +647,7 @@ void drawSource(coord_t x, coord_t y, uint32_t idx, LcdFlags att)
     drawStringWithIndex(x, y, STR_CH, idx-MIXSRC_CH1+1, att);
     if (ZEXIST(g_model.limitData[idx-MIXSRC_CH1].name) && (att & STREXPANDED)) {
       lcdDrawChar(lcdLastRightPos, y, ' ', att|SMLSIZE);
-      lcdDrawSizedText(lcdLastRightPos+3, y, g_model.limitData[idx-MIXSRC_CH1].name, LEN_CHANNEL_NAME, ZCHAR|att|SMLSIZE);
+      lcdDrawSizedText(lcdLastRightPos+3, y, g_model.limitData[idx-MIXSRC_CH1].name, LEN_CHANNEL_NAME, att|SMLSIZE);
     }
   }
   else if (idx <= MIXSRC_LAST_GVAR) {
@@ -651,7 +658,7 @@ void drawSource(coord_t x, coord_t y, uint32_t idx, LcdFlags att)
   }
   else if (idx <= MIXSRC_LAST_TIMER) {
     if(ZEXIST(g_model.timers[idx-MIXSRC_FIRST_TIMER].name)) {
-      lcdDrawSizedText(x, y, g_model.timers[idx-MIXSRC_FIRST_TIMER].name, LEN_TIMER_NAME, ZCHAR|att);
+      lcdDrawSizedText(x, y, g_model.timers[idx-MIXSRC_FIRST_TIMER].name, LEN_TIMER_NAME, att);
     }
     else {
       lcdDrawTextAtIndex(x, y, STR_VSRCRAW, idx-MIXSRC_Rud+1-MAX_LOGICAL_SWITCHES-MAX_TRAINER_CHANNELS-MAX_OUTPUT_CHANNELS-MAX_GVARS, att);
@@ -660,7 +667,7 @@ void drawSource(coord_t x, coord_t y, uint32_t idx, LcdFlags att)
   else {
     idx -= MIXSRC_FIRST_TELEM;
     div_t qr = div(idx, 3);
-    lcdDrawSizedText(x, y, g_model.telemetrySensors[qr.quot].label, TELEM_LABEL_LEN, ZCHAR|att);
+    lcdDrawSizedText(x, y, g_model.telemetrySensors[qr.quot].label, TELEM_LABEL_LEN, att);
     if (qr.rem) lcdDrawChar(lcdLastRightPos, y, qr.rem==2 ? '+' : '-', att);
   }
 }
@@ -670,7 +677,7 @@ void putsChnLetter(coord_t x, coord_t y, uint8_t idx, LcdFlags att)
   lcdDrawTextAtIndex(x, y, STR_RETA123, idx-1, att);
 }
 
-void putsModelName(coord_t x, coord_t y, char *name, uint8_t id, LcdFlags att)
+void drawModelName(coord_t x, coord_t y, char *name, uint8_t id, LcdFlags att)
 {
   uint8_t len = sizeof(g_model.header.name);
   while (len>0 && !name[len-1]) --len;
@@ -678,14 +685,16 @@ void putsModelName(coord_t x, coord_t y, char *name, uint8_t id, LcdFlags att)
     drawStringWithIndex(x, y, STR_MODEL, id+1, att|LEADING0);
   }
   else {
-    lcdDrawSizedText(x, y, name, sizeof(g_model.header.name), ZCHAR|att);
+    lcdDrawSizedText(x, y, name, sizeof(g_model.header.name), att);
   }
 }
 
-void drawSwitch(coord_t x, coord_t y, int32_t idx, LcdFlags flags)
+void drawSwitch(coord_t x, coord_t y, int32_t idx, LcdFlags flags, bool autoBold)
 {
   char s[8];
-  getSwitchString(s, idx);
+  getSwitchPositionName(s, idx);
+  if (autoBold && idx != SWSRC_NONE && getSwitch(idx))
+    flags |= BOLD;
   lcdDrawText(x, y, s, flags);
 }
 
@@ -696,7 +705,7 @@ void drawCurveName(coord_t x, coord_t y, int8_t idx, LcdFlags flags)
   lcdDrawText(x, y, s, flags);
 }
 
-void drawTimerMode(coord_t x, coord_t y, int32_t mode, LcdFlags att)
+void drawTimerMode(coord_t x, coord_t y, swsrc_t mode, LcdFlags att)
 {
   if (mode >= 0) {
     if (mode < TMRMODE_COUNT)
@@ -705,33 +714,6 @@ void drawTimerMode(coord_t x, coord_t y, int32_t mode, LcdFlags att)
       mode -= (TMRMODE_COUNT-1);
   }
   drawSwitch(x, y, mode, att);
-}
-
-void drawTrimMode(coord_t x, coord_t y, uint8_t phase, uint8_t idx, LcdFlags att)
-{
-  trim_t v = getRawTrimValue(phase, idx);
-  unsigned int mode = v.mode;
-  unsigned int p = mode >> 1;
-
-  if (mode == TRIM_MODE_NONE) {
-    lcdDrawText(x, y, "--", att);
-  }
-  else {
-    if (mode % 2 == 0)
-      lcdDrawChar(x, y, ':', att|FIXEDWIDTH);
-    else
-      lcdDrawChar(x, y, '+', att|FIXEDWIDTH);
-    lcdDrawChar(lcdNextPos, y, '0'+p, att);
-  }
-}
-
-void drawValueWithUnit(coord_t x, coord_t y, int32_t val, uint8_t unit, LcdFlags att)
-{
-  // convertUnit(val, unit);
-  lcdDrawNumber(x, y, val, att & (~NO_UNIT));
-  if (!(att & NO_UNIT) && unit != UNIT_RAW) {
-    lcdDrawTextAtIndex(lcdLastRightPos/*+1*/, y, STR_VTELEMUNIT, unit, 0);
-  }
 }
 
 void drawGPSCoord(coord_t x, coord_t y, int32_t value, const char * direction, LcdFlags att, bool seconds=true)
@@ -877,7 +859,7 @@ void lcdDrawHorizontalLine(coord_t x, coord_t y, coord_t w, uint8_t pat, LcdFlag
   }
 }
 
-void lcdDrawVerticalLine(coord_t x, scoord_t y, scoord_t h, uint8_t pat, LcdFlags att)
+void lcdDrawVerticalLine(coord_t x, coord_t y, coord_t h, uint8_t pat, LcdFlags att)
 {
   if (x >= LCD_W) return;
   if (y >= LCD_H) return;

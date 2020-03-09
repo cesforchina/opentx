@@ -31,24 +31,24 @@ FATFS g_FATFS_Obj = {0};
 
 RTOS_MUTEX_HANDLE ioMutex;
 
-int ff_cre_syncobj (BYTE vol, _SYNC_t* sobj) /* Create a sync object */
+int ff_cre_syncobj (BYTE vol, FF_SYNC_t* sobj) /* Create a sync object */
 {
   pthread_mutex_init(&ioMutex, 0);
   return 1;
 }
 
-int ff_req_grant (_SYNC_t sobj)        /* Lock sync object */
+int ff_req_grant (FF_SYNC_t sobj)        /* Lock sync object */
 {
   pthread_mutex_lock(&ioMutex);
   return 1;
 }
 
-void ff_rel_grant (_SYNC_t sobj)        /* Unlock sync object */
+void ff_rel_grant (FF_SYNC_t sobj)        /* Unlock sync object */
 {
   pthread_mutex_unlock(&ioMutex);
 }
 
-int ff_del_syncobj (_SYNC_t sobj)        /* Delete a sync object */
+int ff_del_syncobj (FF_SYNC_t sobj)        /* Delete a sync object */
 {
   pthread_mutex_destroy(&ioMutex);
   return 1;
@@ -214,6 +214,13 @@ void sdInit(void)
       f_lseek(&g_telemetryFile, f_size(&g_telemetryFile)); // append
     }
 #endif
+
+#if defined(LOG_BLUETOOTH)
+    f_open(&g_bluetoothFile, LOGS_PATH "/bluetooth.log", FA_OPEN_ALWAYS | FA_WRITE);
+    if (f_size(&g_bluetoothFile) > 0) {
+      f_lseek(&g_bluetoothFile, f_size(&g_bluetoothFile)); // append
+    }
+#endif
   }
   else {
     TRACE_SIMPGMSPACE("f_mount() failed");
@@ -226,6 +233,9 @@ void sdDone()
     audioQueue.stopSD();
 #if defined(LOG_TELEMETRY)
     f_close(&g_telemetryFile);
+#endif
+#if defined(LOG_BLUETOOTH)
+    f_close(&g_bluetoothFile);
 #endif
     f_mount(NULL, "", 0); // unmount SD
   }

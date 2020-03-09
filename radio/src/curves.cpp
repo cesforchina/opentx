@@ -2,7 +2,7 @@
  * Copyright (C) OpenTX
  *
  * Based on code named
- *   th9x - http://code.google.com/p/th9x 
+ *   th9x - http://code.google.com/p/th9x
  *   er9x - http://code.google.com/p/er9x
  *   gruvin9x - http://code.google.com/p/gruvin9x
  *
@@ -21,8 +21,8 @@
 #include "opentx.h"
 
 uint8_t s_curveChan;
-
 int8_t * curveEnd[MAX_CURVES];
+
 void loadCurves()
 {
   bool showWarning= false;
@@ -70,21 +70,21 @@ bool moveCurve(uint8_t index, int8_t shift)
     AUDIO_WARNING2();
     return false;
   }
-  
+
   int8_t * nextCrv = curveAddress(index+1);
   memmove(nextCrv+shift, nextCrv, 5*(MAX_CURVES-index-1)+curveEnd[MAX_CURVES-1]-curveEnd[index]);
   if (shift < 0) memclear(&g_model.points[MAX_CURVE_POINTS-1] + shift, -shift);
   while (index<MAX_CURVES) {
     curveEnd[index++] += shift;
   }
-  
+
   storageDirty(EE_MODEL);
   return true;
 }
 
 int8_t getCurveX(int noPoints, int point)
 {
-  return -100 + div_and_round((point*2000) / (noPoints-1), 10);
+  return -100 + divRoundClosest((point*2000) / (noPoints-1), 10);
 }
 
 void resetCustomCurveX(int8_t * points, int noPoints)
@@ -94,8 +94,35 @@ void resetCustomCurveX(int8_t * points, int noPoints)
   }
 }
 
+void curveReset(uint8_t index)
+{
+  CurveHeader * curve = &g_model.curves[index];
+  int8_t * points = curveAddress(index);
+
+  memclear(points, 5 + curve->points);
+
+  if (curve->type == CURVE_TYPE_CUSTOM)
+    resetCustomCurveX(points, 5 + curve->points);
+
+  memclear(curve, sizeof(CurveHeader));
+}
+
+void curveMirror(uint8_t index)
+{
+  CurveHeader & curve = g_model.curves[index];
+  int8_t * points = curveAddress(index);
+
+  for (int i = 0; i < 5 + curve.points; i++)
+    points[i] = -points[i];
+}
+
+bool isCurveUsed(uint8_t index)
+{
+  return !is_memclear(&g_model.curves[index], sizeof(CurveHeader)) || !is_memclear(curveAddress(index), 5);
+}
+
 #define CUSTOM_POINT_X(points, count, idx) ((idx)==0 ? -100 : (((idx)==(count)-1) ? 100 : points[(count)+(idx)-1]))
-int32_t compute_tangent(CurveInfo * crv, int8_t * points, int i)
+int32_t compute_tangent(CurveHeader * crv, int8_t * points, int i)
 {
   int32_t m=0;
     uint8_t num_points = crv->points + 5;
@@ -166,7 +193,7 @@ int32_t compute_tangent(CurveInfo * crv, int8_t * points, int i)
 */
 int16_t hermite_spline(int16_t x, uint8_t idx)
 {
-  CurveInfo &crv = g_model.curves[idx];
+  CurveHeader &crv = g_model.curves[idx];
   int8_t *points = curveAddress(idx);
   uint8_t count = crv.points+5;
   bool custom = (crv.type == CURVE_TYPE_CUSTOM);
@@ -211,7 +238,7 @@ int16_t hermite_spline(int16_t x, uint8_t idx)
 
 int intpol(int x, uint8_t idx) // -100, -75, -50, -25, 0 ,25 ,50, 75, 100
 {
-  CurveInfo & crv = g_model.curves[idx];
+  CurveHeader & crv = g_model.curves[idx];
   int8_t * points = curveAddress(idx);
   uint8_t count = crv.points+5;
   bool custom = (crv.type == CURVE_TYPE_CUSTOM);
@@ -307,26 +334,33 @@ int applyCustomCurve(int x, uint8_t idx)
   if (idx >= MAX_CURVES)
     return 0;
 
-  CurveInfo & crv = g_model.curves[idx];
+  CurveHeader & crv = g_model.curves[idx];
   if (crv.smooth)
     return hermite_spline(x, idx);
   else
     return intpol(x, idx);
 }
 
-point_t getPoint(uint8_t i)
+point_t getPoint(uint8_t index)
+{
+  return getPoint(s_curveChan, index);
+}
+
+point_t getPoint(uint8_t curveIndex, uint8_t index)
 {
   point_t result = {0, 0};
-  CurveInfo & crv = g_model.curves[s_curveChan];
-  int8_t * points = curveAddress(s_curveChan);
+  CurveHeader & crv = g_model.curves[curveIndex];
+  int8_t * points = curveAddress(curveIndex);
   bool custom = (crv.type == CURVE_TYPE_CUSTOM);
-  uint8_t count = 5+crv.points;
-  if (i < count) {
-    result.x = CURVE_CENTER_X-1-CURVE_SIDE_WIDTH + i*CURVE_SIDE_WIDTH*2/(count-1);
-    result.y = CURVE_CENTER_Y - (points[i]) * (CURVE_SIDE_WIDTH-1) / 100;
-    if (custom && i>0 && i<count-1) {
-      result.x = CURVE_CENTER_X - 1 - CURVE_SIDE_WIDTH + (100 + (100 + points[count + i - 1]) * (2 * CURVE_SIDE_WIDTH)) / 200;
+  uint8_t count = 5 + crv.points;
+  if (index < count) {
+    if (custom && index > 0 && index < count - 1) {
+      result.x = calc100toRESX(points[count + index - 1]);
     }
+    else {
+      result.x = -RESX + calc100toRESX(200 * index / (count - 1));
+    }
+    result.y = calc100toRESX(points[index]);
   }
   return result;
 }

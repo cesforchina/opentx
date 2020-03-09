@@ -22,18 +22,16 @@
 
 #define CS_LAST_VALUE_INIT -32768
 
-#if defined(PCBHORUS)
+#if defined(COLORLCD)
   #define SWITCH_WARNING_LIST_X        WARNING_LINE_X
   #define SWITCH_WARNING_LIST_Y        WARNING_LINE_Y+3*FH
-  #define SWITCH_WARNING_LIST_INTERVAL 35
 #elif LCD_W >= 212
   #define SWITCH_WARNING_LIST_X        60
-  #define SWITCH_WARNING_LIST_Y        4*FH+3
+  #define SWITCH_WARNING_LIST_Y        4*FH+4
 #else
   #define SWITCH_WARNING_LIST_X        4
   #define SWITCH_WARNING_LIST_Y        4*FH+4
 #endif
-
 
 enum LogicalSwitchContextState {
   SWITCH_START,
@@ -41,23 +39,22 @@ enum LogicalSwitchContextState {
   SWITCH_ENABLE
 };
 
-PACK(typedef struct {
+PACK(struct LogicalSwitchContext {
   uint8_t state:1;
   uint8_t timerState:2;
   uint8_t spare:5;
   uint8_t timer;
   int16_t lastValue;
-}) LogicalSwitchContext;
+});
 
-PACK(typedef struct {
+PACK(struct LogicalSwitchesFlightModeContext {
   LogicalSwitchContext lsw[MAX_LOGICAL_SWITCHES];
-}) LogicalSwitchesFlightModeContext;
+});
 LogicalSwitchesFlightModeContext lswFm[MAX_FLIGHT_MODES];
 
 #define LS_LAST_VALUE(fm, idx) lswFm[fm].lsw[idx].lastValue
 
-
-#if defined(PCBTARANIS) || defined(PCBHORUS)
+#if defined(PCBFRSKY) || defined(PCBFLYSKY)
 #if defined(PCBX9E)
 tmr10ms_t switchesMidposStart[16];
 #else
@@ -132,19 +129,46 @@ void getSwitchesPosition(bool startup)
   CHECK_3POS(0, SW_SA);
   CHECK_3POS(1, SW_SB);
   CHECK_3POS(2, SW_SC);
-  CHECK_3POS(3, SW_SD);
-#if !defined(PCBX7) && !defined(PCBXLITE)
-  CHECK_3POS(4, SW_SE);
-#endif
-#if !defined(PCBXLITE)
+
+#if defined(PCBX9LITES)
+  CHECK_2POS(SW_SD);
+  CHECK_2POS(SW_SE);
   CHECK_2POS(SW_SF);
-#endif
-#if !defined(PCBX7) && !defined(PCBXLITE)
+  CHECK_2POS(SW_SG);
+#elif defined(PCBX9LITE)
+  CHECK_2POS(SW_SD);
+  CHECK_2POS(SW_SE);
+#elif defined(PCBXLITES)
+  CHECK_3POS(3, SW_SD);
+  CHECK_2POS(SW_SE);
+  CHECK_2POS(SW_SF);
+  // no SWG and SWH on XLITES
+#elif defined(PCBXLITE)
+  CHECK_3POS(3, SW_SD);
+  // no SWE, SWF, SWG and SWH on XLITE
+#elif defined(PCBX7)
+  CHECK_3POS(3, SW_SD);
+  CHECK_2POS(SW_SF);
+  CHECK_2POS(SW_SH);
+#else
+  CHECK_3POS(3, SW_SD);
+  CHECK_3POS(4, SW_SE);
+  CHECK_2POS(SW_SF);
   CHECK_3POS(5, SW_SG);
-#endif
-#if !defined(PCBXLITE)
   CHECK_2POS(SW_SH);
 #endif
+
+#if defined(RADIO_X9DP2019)
+  CHECK_2POS(SW_SI);
+#endif
+
+#if defined(PCBX7ACCESS)
+  CHECK_2POS(SW_SI);
+#elif defined(PCBHORUS) || defined(PCBX7)
+  CHECK_2POS(SW_SI);
+  CHECK_2POS(SW_SJ);
+#endif
+
 #if defined(PCBX9E)
   CHECK_3POS(6, SW_SI);
   CHECK_3POS(7, SW_SJ);
@@ -185,7 +209,6 @@ void getSwitchesPosition(bool startup)
     }
   }
 }
-
 
 getvalue_t getValueForLogicalSwitch(mixsrc_t i)
 {
@@ -275,7 +298,6 @@ bool getLogicalSwitch(uint8_t idx)
     }
     else {
       mixsrc_t v1 = ls->v1;
-#if defined(TELEMETRY_FRSKY)
       // Telemetry
       if (v1 >= MIXSRC_FIRST_TELEM) {
         if (!TELEMETRY_STREAMING() || IS_FAI_FORBIDDEN(v1-1)) {
@@ -293,17 +315,6 @@ bool getLogicalSwitch(uint8_t idx)
       else {
         y = calc100toRESX(ls->v2);
       }
-#else
-      if (v1 >= MIXSRC_FIRST_TELEM) {
-        y = (int16_t)3 * (128+ls->v2); // it's a Timer
-      }
-      else if (v1 >= MIXSRC_GVAR1) {
-        y = ls->v2; // it's a GVAR
-      }
-      else {
-        y = calc100toRESX(ls->v2);
-      }
-#endif
 
       switch (ls->func) {
         case LS_FUNC_VEQUAL:
@@ -360,9 +371,7 @@ bool getLogicalSwitch(uint8_t idx)
     }
   }
 
-#if defined(TELEMETRY_FRSKY)
 DurationAndDelayProcessing:
-#endif
 
     if (ls->delay || ls->duration) {
       LogicalSwitchContext &context = lswFm[mixerCurrentFlightMode].lsw[idx];
@@ -419,8 +428,13 @@ bool getSwitch(swsrc_t swtch, uint8_t flags)
   else if (cs_idx == SWSRC_ON) {
     result = true;
   }
+#if defined(DEBUG_LATENCY)
+  else if (cs_idx == SWSRC_LATENCY_TOGGLE) {
+    result = latencyToggleSwitch;
+  }
+#endif
   else if (cs_idx <= SWSRC_LAST_SWITCH) {
-#if defined(PCBTARANIS) || defined(PCBHORUS)
+#if defined(PCBFRSKY)
     if (flags & GETSWITCH_MIDPOS_DELAY)
       result = SWITCH_POSITION(cs_idx-SWSRC_FIRST_SWITCH);
     else
@@ -440,16 +454,9 @@ bool getSwitch(swsrc_t swtch, uint8_t flags)
     idx = (CONVERT_MODE_TRIMS(idx/2) << 1) + (idx & 1);
     result = trimDown(idx);
   }
-#if ROTARY_ENCODERS > 0
-  else if (cs_idx == SWSRC_REa) {
-    result = REA_DOWN();
+  else if (cs_idx == SWSRC_RADIO_ACTIVITY) {
+    result = (inactivity.counter < 2);
   }
-#endif
-#if ROTARY_ENCODERS > 1
-  else if (cs_idx == SWSRC_REb) {
-    result = REB_DOWN();
-  }
-#endif
   else if (cs_idx >= SWSRC_FIRST_SENSOR) {
     result = !telemetryItems[cs_idx-SWSRC_FIRST_SENSOR].isOld();
   }
@@ -501,7 +508,7 @@ swsrc_t getMovedSwitch()
   static tmr10ms_t s_move_last_time = 0;
   swsrc_t result = 0;
 
-#if defined(PCBTARANIS) || defined(PCBHORUS)
+#if defined(PCBFRSKY)
   for (int i=0; i<NUM_SWITCHES; i++) {
     if (SWITCH_EXISTS(i)) {
       swarnstate_t mask = ((swarnstate_t)0x03 << (i*2));
@@ -519,13 +526,13 @@ swsrc_t getMovedSwitch()
   // -4..-8 for all other switches if changed to false
   // 9 for Trainer switch if changed to true; Change to false is ignored
   swarnstate_t mask = 0x80;
-  for (uint8_t i=NUM_PSWITCH; i>1; i--) {
+  for (uint8_t i=NUM_SWITCHES_POSITIONS; i>1; i--) {
     bool prev;
     prev = (switches_states & mask);
     // don't use getSwitch here to always get the proper value, even getSwitch manipulates
     bool next = switchState(i-1);
     if (prev != next) {
-      if (((i<NUM_PSWITCH) && (i>3)) || next==true)
+      if (((i<NUM_SWITCHES_POSITIONS) && (i>3)) || next==true)
         result = next ? i : -i;
       if (i<=3 && result==0) result = 1;
       switches_states ^= mask;
@@ -541,19 +548,29 @@ swsrc_t getMovedSwitch()
   return result;
 }
 
-#if defined(GUI)
+#if defined(COLORLCD)
+#include "switch_warn_dialog.h"
+void checkSwitches()
+{
+  auto dialog = new SwitchWarnDialog();
+  dialog->runForever();
+}
+#elif defined(GUI)
 void checkSwitches()
 {
   swarnstate_t last_bad_switches = 0xff;
   swarnstate_t states = g_model.switchWarningState;
 
-#if defined(PCBTARANIS) || defined(PCBHORUS)
+#if defined(PCBFRSKY) || defined(PCBFLYSKY)
   uint8_t bad_pots = 0, last_bad_pots = 0xff;
 #endif
 
-  while (1) {
+#if defined(PWR_BUTTON_PRESS)
+  bool refresh = false;
+#endif
 
-#if defined(PCBTARANIS) || defined(PCBHORUS)
+  while (true) {
+#if defined(PCBFRSKY)
   #define GETADC_COUNT 1
 #endif
 
@@ -634,92 +651,9 @@ void checkSwitches()
     backlightOn();
 
     // first - display warning
-#if defined(PCBTARANIS) || defined(PCBHORUS)
-    if ((last_bad_switches != switches_states) || (last_bad_pots != bad_pots)) {
-      drawAlertBox(STR_SWITCHWARN, NULL, STR_PRESSANYKEYTOSKIP);
-      if (last_bad_switches == 0xff || last_bad_pots == 0xff) {
-        AUDIO_ERROR_MESSAGE(AU_SWITCH_ALERT);
-      }
-      int x = SWITCH_WARNING_LIST_X, y = SWITCH_WARNING_LIST_Y;
-      int numWarnings = 0;
-      for (int i=0; i<NUM_SWITCHES; ++i) {
-#if defined(COLORLCD)
-        if (SWITCH_WARNING_ALLOWED(i)) {
-          unsigned int state = ((g_model.switchWarningState >> (3*i)) & 0x07);
-          if (state && state-1 != ((switches_states >> (i*2)) & 0x03)) {
-            if (++numWarnings < 6) {
-              // LcdFlags attr = ((states & mask) == (switches_states & mask)) ? TEXT_COLOR : ALARM_COLOR;
-              LcdFlags attr = ALARM_COLOR;
-              drawSwitch(x, y, SWSRC_FIRST_SWITCH+i*3+state-1, attr);
-              x += SWITCH_WARNING_LIST_INTERVAL;
-            }
-            else if (numWarnings == 6) {
-              lcdDrawText(x, y, "...", ALARM_COLOR);
-            }
-          }
-        }
-#else
-        if (SWITCH_WARNING_ALLOWED(i) && !(g_model.switchWarningEnable & (1<<i))) {
-          swarnstate_t mask = ((swarnstate_t)0x03 << (i*2));
-          LcdFlags attr = ((states & mask) == (switches_states & mask)) ? 0 : INVERS;
-          if (attr) {
-            if (++numWarnings < 7) {
-              char c = "\300-\301"[(states & mask) >> (i*2)];
-              drawSource(x, y, MIXSRC_FIRST_SWITCH+i, attr);
-              lcdDrawChar(lcdNextPos, y, c, attr);
-              x = lcdNextPos + 3;
-            }
-            else if (numWarnings == 7) {
-              lcdDrawText(x, y, "...", 0);
-            }
-          }
-        }
-#endif
-      }
-
-      if (g_model.potsWarnMode) {
-        if (y == 4*FH+3) {
-          y = 6*FH-2;
-          x = 60;
-        }
-        for (int i=0; i<NUM_POTS+NUM_SLIDERS; i++) {
-          if (!IS_POT_SLIDER_AVAILABLE(POT1+i)) {
-            continue;
-          }
-          if (!(g_model.potsWarnEnabled & (1 << i))) {
-            if (abs(g_model.potsWarnPosition[i] - GET_LOWRES_POT_POSITION(i)) > 1) {
-#if defined(COLORLCD)
-              char s[8];
-              // TODO add an helper
-              strncpy(s, &STR_VSRCRAW[1+(NUM_STICKS+1+i)*STR_VSRCRAW[0]], STR_VSRCRAW[0]);
-              s[int(STR_VSRCRAW[0])] = '\0';
-#else
-              lcdDrawTextAtIndex(x, y, STR_VSRCRAW, NUM_STICKS+1+i, INVERS);
-              if (IS_POT(POT1+i))
-                lcdDrawChar(lcdNextPos, y, g_model.potsWarnPosition[i] > GET_LOWRES_POT_POSITION(i) ? 126 : 127, INVERS);
-              else
-                lcdDrawChar(lcdNextPos, y, g_model.potsWarnPosition[i] > GET_LOWRES_POT_POSITION(i) ? '\300' : '\301', INVERS);
-#endif
-#if defined(COLORLCD)
-              if (++numWarnings < 6) {
-                lcdDrawText(x, y, s, ALARM_COLOR);
-              }
-              else if (numWarnings == 6) {
-                lcdDrawText(x, y, "...", ALARM_COLOR);
-              }
-              x += 40;
-#else
-              x = lcdNextPos + 3;
-#endif
-            }
-
-          }
-        }
-      }
-      last_bad_pots = bad_pots;
-#else
+#if defined(PCBSKY9X)
     if (last_bad_switches != switches_states) {
-      RAISE_ALERT(STR_SWITCHWARN, NULL, STR_PRESSANYKEYTOSKIP, last_bad_switches == 0xff ? AU_SWITCH_ALERT : AU_NONE);
+      RAISE_ALERT(STR_SWITCHWARN, NULL, STR_PRESS_ANY_KEY_TO_SKIP, last_bad_switches == 0xff ? AU_SWITCH_ALERT : AU_NONE);
       uint8_t x = 2;
       for (uint8_t i=0; i<NUM_SWITCHES-1; i++) {
         uint8_t attr;
@@ -731,20 +665,91 @@ void checkSwitches()
           drawSwitch(x, 5*FH, (i>0?(i+3):(states&0x3)+1), attr);
         x += 3*FW+FW/2;
       }
+#else
+    if (last_bad_switches != switches_states || last_bad_pots != bad_pots) {
+      drawAlertBox(STR_SWITCHWARN, nullptr, STR_PRESS_ANY_KEY_TO_SKIP);
+      if (last_bad_switches == 0xff || last_bad_pots == 0xff) {
+        AUDIO_ERROR_MESSAGE(AU_SWITCH_ALERT);
+      }
+      int x = SWITCH_WARNING_LIST_X;
+      int y = SWITCH_WARNING_LIST_Y;
+      int numWarnings = 0;
+      for (int i=0; i<NUM_SWITCHES; ++i) {
+        if (SWITCH_WARNING_ALLOWED(i) && !(g_model.switchWarningEnable & (1<<i))) {
+          swarnstate_t mask = ((swarnstate_t)0x03 << (i*2));
+          LcdFlags attr = ((states & mask) == (switches_states & mask)) ? 0 : INVERS;
+          if (attr) {
+            if (++numWarnings < 6) {
+              char c = "\300-\301"[(states & mask) >> (i*2)];
+              drawSource(x, y, MIXSRC_FIRST_SWITCH+i, attr);
+              lcdDrawChar(lcdNextPos, y, c, attr);
+              x = lcdNextPos + 3;
+            }
+          }
+        }
+      }
+
+      if (g_model.potsWarnMode) {
+        for (int i=0; i<NUM_POTS+NUM_SLIDERS; i++) {
+          if (!IS_POT_SLIDER_AVAILABLE(POT1+i)) {
+            continue;
+          }
+          if (!(g_model.potsWarnEnabled & (1 << i))) {
+            if (abs(g_model.potsWarnPosition[i] - GET_LOWRES_POT_POSITION(i)) > 1) {
+              if (++numWarnings < 6) {
+                lcdDrawTextAtIndex(x, y, STR_VSRCRAW, NUM_STICKS + 1 + i, INVERS);
+                if (IS_POT(POT1 + i))
+                  lcdDrawChar(lcdNextPos, y, g_model.potsWarnPosition[i] > GET_LOWRES_POT_POSITION(i) ? 126 : 127, INVERS);
+                else
+                  lcdDrawChar(lcdNextPos, y, g_model.potsWarnPosition[i] > GET_LOWRES_POT_POSITION(i) ? '\300' : '\301', INVERS);
+                x = lcdNextPos + 3;
+              }
+            }
+          }
+        }
+      }
+
+      if (numWarnings >= 6) {
+        lcdDrawText(x, y, "...", 0);
+      }
+
+      last_bad_pots = bad_pots;
 #endif
 
       lcdRefresh();
       lcdSetContrast();
-      clearKeyEvents();
+      waitKeysReleased();
 
       last_bad_switches = switches_states;
     }
 
-    if (pwrCheck() == e_power_off || keyDown()) break;
+    if (keyDown())
+      break;
 
-    doLoopCommonActions();
+#if defined(PWR_BUTTON_PRESS)
+    uint32_t power = pwrCheck();
+    if (power == e_power_off) {
+      drawSleepBitmap();
+      boardOff();
+      break;
+    }
+    else if (power == e_power_press) {
+      refresh = true;
+    }
+    else if (power == e_power_on && refresh) {
+      last_bad_switches = 0xff;
+      last_bad_pots = 0xff;
+      refresh = false;
+    }
+#else
+    if (pwrCheck() == e_power_off) {
+      break;
+    }
+#endif
 
-    wdt_reset();
+    checkBacklight();
+
+    WDG_RESET();
 
     RTOS_WAIT_MS(10);
   }
@@ -759,10 +764,11 @@ void logicalSwitchesTimerTick()
     for (uint8_t i=0; i<MAX_LOGICAL_SWITCHES; i++) {
       LogicalSwitchData * ls = lswAddress(i);
       if (ls->func == LS_FUNC_TIMER) {
-        int16_t *lastValue = &LS_LAST_VALUE(fm, i);
+        int16_t * lastValue = &LS_LAST_VALUE(fm, i);
         if (*lastValue == 0 || *lastValue == CS_LAST_VALUE_INIT) {
           *lastValue = -lswTimerValue(ls->v1);
         }
+
         else if (*lastValue < 0) {
           if (++(*lastValue) == 0)
             *lastValue = lswTimerValue(ls->v2);

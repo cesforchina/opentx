@@ -53,7 +53,7 @@ static int luaLcdClear(lua_State *L)
 {
   if (luaLcdAllowed) {
 #if defined(COLORLCD)
-    LcdFlags color = luaL_optunsigned(L, 1, TEXT_BGCOLOR);
+    LcdFlags color = luaL_optunsigned(L, 1, DEFAULT_BGCOLOR);
     lcd->clear(color);
 #else
     lcdClear();
@@ -71,6 +71,8 @@ Draw a single pixel at (x,y) position
 
 @param y (positive number) y position
 
+@param flags (optional) lcdflags
+
 @notice Taranis has an LCD display width of 212 pixels and height of 64 pixels.
 Position (0,0) is at top left. Y axis is negative, top line is 0,
 bottom line is 63. Drawing on an existing black pixel produces white pixel (TODO check this!)
@@ -82,7 +84,8 @@ static int luaLcdDrawPoint(lua_State *L)
   if (!luaLcdAllowed) return 0;
   int x = luaL_checkinteger(L, 1);
   int y = luaL_checkinteger(L, 2);
-  lcdDrawPoint(x, y);
+  LcdFlags att = luaL_optunsigned(L, 3, 0);
+  lcdDrawPoint(x, y, att);
   return 0;
 }
 
@@ -95,14 +98,14 @@ Draw a straight line on LCD
 
 @param x2,y2 (positive numbers) end coordinate
 
-@param pattern TODO
+@param pattern SOLID or DOTTED
 
-@param flags TODO
+@param flags lcdflags
 
 @notice If the start or the end of the line is outside the LCD dimensions, then the
 whole line will not be drawn (starting from OpenTX 2.1.5)
 
-@status current Introduced in 2.0.0
+@status current Introduced in 2.0.0, flags introduced in 2.3.6
 */
 static int luaLcdDrawLine(lua_State *L)
 {
@@ -454,8 +457,8 @@ static int luaGetBitmapSize(lua_State * L)
 {
   const BitmapBuffer * b = checkBitmap(L, 1);
   if (b) {
-    lua_pushinteger(L, b->getWidth());
-    lua_pushinteger(L, b->getHeight());
+    lua_pushinteger(L, b->width());
+    lua_pushinteger(L, b->height());
   }
   else {
     lua_pushinteger(L, 0);
@@ -541,7 +544,7 @@ Draw a bitmap at (x,y)
 
 @param name (string) full path to the bitmap on SD card (i.e. “/IMAGES/test.bmp”)
 
-@notice Only available on Taranis X9 series. Maximum image size if 106 x 64 pixels (width x height).
+@notice Maximum image size is [display width / 2] x [display height] pixels.
 
 @status current Introduced in 2.0.0
 */
@@ -777,28 +780,28 @@ Set a color for specific area
 
 @param area (unsigned number) specific screen area in the list bellow
  * `CUSTOM_COLOR`
- * `TEXT_COLOR`
- * `TEXT_BGCOLOR`
- * `TEXT_INVERTED_COLOR`
- * `TEXT_INVERTED_BGCOLOR`
+ * `DEFAULT_COLOR`
+ * `DEFAULT_BGCOLOR`
+ * `FOCUS_COLOR`
+ * `FOCUS_BGCOLOR`
  * `LINE_COLOR`
- * `SCROLLBOX_COLOR`
- * `MENU_TITLE_BGCOLOR`
- * `MENU_TITLE_COLOR`
+ * `CHECKBOX_COLOR`
+ * `MENU_BGCOLOR`
+ * `MENU_COLOR`
  * `MENU_TITLE_DISABLE_COLOR`
  * `HEADER_COLOR`
  * `ALARM_COLOR`
- * `WARNING_COLOR`
+ * `HIGHLIGHT_COLOR`
  * `TEXT_DISABLE_COLOR`
  * `HEADER_COLOR`
- * `CURVE_AXIS_COLOR`
+ * `DISABLE_COLOR`
  * `CURVE_CURSOR_COLOR`
  * `TITLE_BGCOLOR`
  * `TRIM_BGCOLOR`
  * `TRIM_SHADOW_COLOR`
  * `MAINVIEW_PANES_COLOR`
  * `MAINVIEW_GRAPHICS_COLOR`
- * `HEADER_BGCOLOR`
+ * `MENU_BGCOLOR`
  * `HEADER_ICON_BGCOLOR`
  * `HEADER_CURRENT_BGCOLOR`
  * `OVERLAY_COLOR`

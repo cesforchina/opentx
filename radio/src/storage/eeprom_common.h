@@ -18,6 +18,9 @@
  * GNU General Public License for more details.
  */
 
+#ifndef _EEPROM_COMMON_H_
+#define _EEPROM_COMMON_H_
+
 #define EEPROM_MIN_MODEL_SIZE          256
 
 uint16_t eeLoadModelData(uint8_t id);
@@ -25,15 +28,21 @@ uint16_t eeLoadGeneralSettingsData();
 
 bool eeModelExists(uint8_t id);
 void eeLoadModel(uint8_t id);
-bool eeConvert();
-void ConvertModel(int id, int version);
 uint8_t eeFindEmptyModel(uint8_t id, bool down);
 void selectModel(uint8_t sub);
 
-  extern ModelHeader modelHeaders[MAX_MODELS];
-  void eeLoadModelHeader(uint8_t id, ModelHeader *header);
-  void eeLoadModelHeaders();
+extern ModelHeader modelHeaders[MAX_MODELS];
+void eeLoadModelHeader(uint8_t id, ModelHeader *header);
+void eeLoadModelHeaders();
 
-void storageReadRadioSettings();
+void storageClearRadioSettings();
+bool storageReadRadioSettings(bool allowFixes = true);
 void storageReadCurrentModel();
 
+#if defined(EEPROM_RLC)
+#include "eeprom_rlc.h"
+#else
+#include "eeprom_raw.h"
+#endif
+
+#endif

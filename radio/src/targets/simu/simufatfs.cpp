@@ -124,11 +124,20 @@ bool redirectToSettingsDirectory(const std::string & path)
   */
   if (!simuSettingsDirectory.empty()) {
 #if defined(COLORLCD)
-    if (path == RADIO_MODELSLIST_PATH || path == RADIO_SETTINGS_PATH) {
+    if (path == RADIO_MODELSLIST_PATH || path == RADIO_SETTINGS_PATH
+#if defined(SDCARD_YAML)
+        || path == RADIO_MODELSLIST_YAML_PATH || path == RADIO_SETTINGS_YAML_PATH
+#endif
+        ) {
       return true;
     }
 #endif
-    if (startsWith(path, "/MODELS") && endsWith(path, MODELS_EXT)) {
+    if (startsWith(path, "/MODELS")
+        && (endsWith(path, MODELS_EXT)
+#if defined(SDCARD_YAML)
+            || endsWith(path, YAML_EXT)
+#endif
+            )) {
       return true;
     }
   }
@@ -361,7 +370,7 @@ TCHAR * f_gets (TCHAR* buff, int len, FIL* fil)
 {
   if (fil && fil->obj.fs) {
     buff = fgets(buff, len, (FILE*)fil->obj.fs);
-    if (buff != NULL) {
+    if (buff != nullptr) {
       fil->fptr = *buff;
     }
     // TRACE_SIMPGMSPACE("fgets(%p) %u, %s", fil->obj.fs, len, buff);
@@ -396,7 +405,7 @@ FRESULT f_close (FIL * fil)
   TRACE_SIMPGMSPACE("f_close(%p) (FIL:%p)", fil->obj.fs, fil);
   if (fil->obj.fs) {
     fclose((FILE*)fil->obj.fs);
-    fil->obj.fs = NULL;
+    fil->obj.fs = nullptr;
   }
   return FR_OK;
 }
@@ -458,7 +467,7 @@ FRESULT f_readdir (DIR * rep, FILINFO * fil)
   }
 #endif
 
-  memset(fil->fname, 0, _MAX_LFN);
+  memset(fil->fname, 0, FF_MAX_LFN);
   strcpy(fil->fname, ent->d_name);
   // TRACE_SIMPGMSPACE("f_readdir(): %s", fil->fname);
   return FR_OK;
@@ -516,7 +525,7 @@ FRESULT f_rename(const TCHAR *oldname, const TCHAR *newname)
 
 FRESULT f_utime(const TCHAR* path, const FILINFO* fno)
 {
-  if (fno == NULL)
+  if (fno == nullptr)
     return FR_INVALID_PARAMETER;
 
   std::string simpath = convertToSimuPath(path);
