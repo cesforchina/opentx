@@ -25,16 +25,36 @@ void drawCurve(int x, int y, int width)
   drawFunction(applyCurrentCurve, x, y, width);
 }
 
-void displayPresetChoice(event_t event)
+void runPopupCurvePreset(event_t event)
 {
-  runPopupWarning(event);
-  lcdDrawNumber(WARNING_LINE_X, WARNING_INFOLINE_Y-10, 45*warningInputValue/4, LEFT|INVERS, 0, NULL, "@");
+  warningResult = false;
+
+  theme->drawMessageBox(warningText, warningInfoText, STR_POPUPS_ENTER_EXIT, warningType);
+
+  switch (event) {
+    case EVT_KEY_BREAK(KEY_ENTER):
+      warningResult = true;
+      // no break
+
+    case EVT_KEY_BREAK(KEY_EXIT):
+      warningText = NULL;
+      warningType = WARNING_TYPE_ASTERISK;
+      break;
+
+    default:
+      s_editMode = EDIT_MODIFY_FIELD;
+      reusableBuffer.curveEdit.preset = checkIncDec(event, reusableBuffer.curveEdit.preset, -4, +4);
+      s_editMode = EDIT_SELECT_FIELD;
+      break;
+  }
+
+  lcdDrawNumber(WARNING_LINE_X, WARNING_INFOLINE_Y-10, 45 * reusableBuffer.curveEdit.preset / 4, LEFT|INVERS, 0, NULL, "@");
 
   if (warningResult) {
     warningResult = 0;
     CurveInfo & crv = g_model.curves[s_curveChan];
     int8_t * points = curveAddress(s_curveChan);
-    int k = 25 * warningInputValue;
+    int k = 25 * reusableBuffer.curveEdit.preset;
     int dx = 2000 / (5+crv.points-1);
     for (uint8_t i=0; i<5+crv.points; i++) {
       int x = -1000 + i * dx;
@@ -49,7 +69,8 @@ void displayPresetChoice(event_t event)
 void onCurveOneMenu(const char * result)
 {
   if (result == STR_CURVE_PRESET) {
-    POPUP_INPUT(STR_PRESET, displayPresetChoice, 0, -4, 4);
+    reusableBuffer.curveEdit.preset = 4; // 45°
+    POPUP_INPUT(STR_PRESET, runPopupCurvePreset);
   }
   else if (result == STR_MIRROR) {
     CurveInfo & crv = g_model.curves[s_curveChan];
@@ -112,7 +133,7 @@ bool menuModelCurveOne(event_t event)
 
   // Curve type
   LcdFlags attr = (menuVerticalPosition==ITEM_CURVE_TYPE ? (s_editMode>0 ? INVERS|BLINK : INVERS) : 0);
-  lcdDrawText(MENUS_MARGIN_LEFT, MENU_CONTENT_TOP, "Type");
+  lcdDrawText(MENUS_MARGIN_LEFT, MENU_CONTENT_TOP, STR_TYPE);
   lcdDrawTextAtIndex(MODEL_CURVE_ONE_2ND_COLUMN, MENU_CONTENT_TOP, STR_CURVE_TYPES, crv.type, attr);
   if (attr) {
     uint8_t newType = checkIncDecModelZero(event, crv.type, CURVE_TYPE_LAST);
